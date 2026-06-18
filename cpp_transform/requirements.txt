@@ -1,0 +1,13 @@
+# Python dependencies for cpp_transform
+lxml>=5.0
+# Test-only
+pytest>=8.0
+
+# External (not pip-installable) runtime requirements:
+#   * srcml  1.1.0   (https://www.srcml.org)  -- parse/unparse backend
+#   * a C/C++ compiler for optional validation:
+#       clang/clang++ preferred, gcc/g++ fallback
+#
+# Configure srcml location via:
+#   SRCML_BIN=/path/to/srcml   SRCML_LIB=/path/to/srcml/lib
+# or the --srcml-bin / --srcml-lib CLI flags.
