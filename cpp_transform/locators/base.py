@@ -10,20 +10,19 @@ from abc import ABC, abstractmethod
 
 from lxml import etree
 
-from ..common import NS, enclosing_function_name, src, text_of
+from ..common import enclosing_function_name, src, text_of
+from ..location.model import SourceLocation, from_srcml_node
 from ..model.candidate import Candidate
 
 
-def source_location(node: etree._Element) -> dict[str, int] | None:
-    """Best-effort (line, col) from srcML position attributes if present."""
-    start = node.get(f"{{{NS['pos']}}}start")
-    if not start:
-        return None
-    try:
-        line, col = start.split(":")
-        return {"line": int(line), "col": int(col)}
-    except (ValueError, TypeError):
-        return None
+def source_location(node: etree._Element) -> SourceLocation | None:
+    """Eagerly freeze a node's srcML position into a ``SourceLocation``.
+
+    Returns ``None`` if the tree was parsed without ``--position``. Coordinates
+    are captured now (input-relative) so later tree mutation cannot make them
+    stale; the pipeline enriches basis/mapping/tab metadata afterwards.
+    """
+    return from_srcml_node(node)
 
 
 class Locator(ABC):

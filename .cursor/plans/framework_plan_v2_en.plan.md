@@ -4,19 +4,19 @@ overview: Add a source-location tracking system to the existing srcML+lxml stric
 todos:
   - id: srcml-position-study
     content: Feasibility study (no assumptions; run by the agent directly, leaving no tables or test files) - empirically test srcML --position start/end representation, 1-based/0-based, tab effect on columns, which node types carry positions, whether positions interfere with mutation/unparse, whether they go stale after a transform, and whether reparsing is required; report the findings verbally for your own judgment.
-    status: pending
+    status: completed
   - id: single-vs-dual-decision
     content: Decide between single-tree and dual-tree based on the study results; if dual-tree, implement "locate on the clean tree + position sidecar + structural index-path mapping"; capture positions eagerly into SourceLocation value objects at locate time.
-    status: pending
+    status: completed
   - id: location-model
     content: Implement the SourceLocation model with input/original/transformed/repo basis and mapping_status; fix source_location parsing (start+end); add a with_position option to the frontend.
-    status: pending
+    status: completed
   - id: location-flow
     content: Thread location information through locate/pick/transform/unparse/report; extend the output JSONL and report; define file/function/snippet/JSONL-field semantics and repository line-number recovery rules.
-    status: pending
+    status: completed
   - id: output-location-extension
     content: Extend TransformResult/run_log/report with the locations field and a location-recovery-rate summary.
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -24,6 +24,39 @@ isProject: false
 
 > Constraint compliance: this plan **does not modify any existing code**. lxml remains the default and only rewriting backend.
 > Split note: this V2 **covers source-location tracking only**; repository-level compilation validation has been split out into **V3** (`framework_plan_v3_*`). V3's "locate the file and code position / reverse line-number mapping" depends on this V2 location model.
+
+---
+
+## 0. Implementation Status (✅ Done — 2026-06, incl. post-review simplification)
+
+Implemented and passing all 36 tests. Decision: **Option A (single-tree)** — the feasibility study confirmed position attributes have **zero interference** with mutation/unparse, so no dual-tree is needed; `SourceLocation` is captured eagerly at locate time (before mutation).
+
+**Final data model (simplified after review, 9 fields -> 6)**
+
+- `SourceLocation` (6 fields): `source` (file path or JSONL field name), `relative_to` (`input` | `file` | `output` | `repo`), `start_line/start_col/end_line/end_col` (1-based).
+  - Merged: old `basis` + `mapping_status` -> a single `relative_to`; renamed `path_or_field` -> `source`.
+  - Dropped: `confidence` (dead field). Moved out: `tab_size` -> **run-level** (the `run_meta` line of `run_log.jsonl` + the report).
+- `transform` block (flattened; the `locations` sub-block is gone):
+  - `candidate_count`: total candidates located (selected + not).
+  - `selected_candidates`: **slim** structured descriptions of the changed candidates (`cid`/`node_type`/`enclosing_function`/`original_text`/`source_location`); the **before location** is each candidate's `source_location` (precise, per candidate).
+  - `transformed_location`: **after location = list of changed line ranges (Option B)**, from `changed_line_spans` line-diffing original vs. output, `relative_to=output`, columns unset; a pure deletion is a zero-width point.
+- **De-duplication**: the old design stored the before location three times (`candidate`/`selected[0]`/`original`); it is now a single source of truth (each selected candidate's `source_location`).
+
+**Per-file changes**
+
+- **Added** [location/model.py](cpp_transform/location/model.py) + [__init__.py](cpp_transform/location/__init__.py): `SourceLocation`, `from_srcml_node()`, `apply_input_context()`, `changed_line_spans()`.
+- **frontend**: `parse(..., with_position=False)`, appending `--position --tabs=N`; `tab_size` stays a frontend config (default 8).
+- **pipeline**: parse with positions -> enrich before locations -> mutate -> unparse -> fill `candidate_count`/`selected_candidates`/`transformed_location`.
+- **cli**: tag input semantics (`file`/`snippet`/`jsonl_field`); run_log gains `candidate_count`/`before_line`/`relative_to` and a run-level `tab_size` `run_meta` entry; combined mode aggregates.
+- **report**: "Source locations" section (before/after coverage + `relative_to` distribution + `tab_size`).
+- [io/writer.py](cpp_transform/io/writer.py) needed **no change**: serialized via `TransformResult.to_dict()`.
+
+**Key semantics & settled questions**
+
+- Input semantics: `file` input -> before `relative_to=file`; `function/snippet/jsonl_field` -> `relative_to=input` (**no fabricated** repo line numbers).
+- **Repository line-number recovery (`relative_to=repo`) is deferred to V3** (needs the dataset's file/commit anchors; `line_changes.line_no` is function-relative — the gap V3 will close).
+- After locations are line-level, intended for reports + V3 compile-error attribution; detector evaluation is repo/function level, so column-precise per-candidate after-positions are not needed.
+- Settled: default `--tabs=8`; primary runtime is **WSL**; Option A has no sidecar performance concern.
 
 ---
 

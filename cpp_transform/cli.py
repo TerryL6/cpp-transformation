@@ -24,6 +24,7 @@ from . import transforms as _transforms  # noqa: F401  (populates REGISTRY)
 from .frontends.srcml_frontend import SrcmlFrontend
 from .io.dataset import detect_code_fields, detect_language, iter_jsonl
 from .io.writer import RunLog, build_output_record, write_jsonl
+from .location.model import apply_input_context, changed_line_spans
 from .model.context import TransformContext
 from .pipeline import apply_transform
 from .report import generate_report
@@ -48,6 +49,13 @@ def resolve_transforms(spec: str) -> list[str]:
     return names
 
 
+def _first_before(selected_candidates: list[dict]) -> dict:
+    """The BEFORE source_location of the first selected candidate (or {})."""
+    if not selected_candidates:
+        return {}
+    return selected_candidates[0].get("source_location") or {}
+
+
 # -- file ------------------------------------------------------------------
 def cmd_file(args) -> int:
     frontend = make_frontend(args)
@@ -64,14 +72,24 @@ def cmd_file(args) -> int:
         return 2
     language = decision.language
 
+    input_kind = "file" if args.input else "snippet"
+    source = args.input if args.input else None
+
     if args.dump_candidates:
-        unit = frontend.parse(code, language)
-        ctx = TransformContext(unit, language, frontend)
+        unit = frontend.parse(code, language, with_position=True)
+        ctx = TransformContext(
+            unit, language, frontend,
+            input_kind=input_kind, source=source,
+        )
         names = resolve_transforms(args.transform)
         dump = {}
         for name in names:
             t = get_transform(name)
-            dump[name] = [c.to_dict() for c in t.find_candidates(ctx)]
+            cands = t.find_candidates(ctx)
+            for c in cands:
+                if c.source_location is not None:
+                    apply_input_context(c.source_location, input_kind, source)
+            dump[name] = [c.to_dict() for c in cands]
         print(json.dumps(dump, ensure_ascii=False, indent=2))
         return 0
 
@@ -81,6 +99,7 @@ def cmd_file(args) -> int:
             frontend, current, language, get_transform(name),
             pick=args.pick, seed=args.seed,
             compiler_validate=args.compiler_validate,
+            input_kind=input_kind, source=source,
         )
         print(
             f"[{name}] status={res.status} changed={res.changed} "
@@ -105,8 +124,24 @@ def cmd_batch(args) -> int:
     out_records: list[dict] = []
     log = RunLog()
     n_in = n_out = n_skip = n_fail = 0
+    # Run-level metadata: tab_size is constant for the whole run, so it is
+    # recorded once here rather than on every SourceLocation. It tells consumers
+    # how to interpret column numbers on tab-indented lines.
+    log.add(event="run_meta", tab_size=frontend.tab_size,
+            transforms=names, fields=args.fields, mode=args.mode)
+
+    # Optional input selection (handy for previewing on stdout):
+    #   --lines  process only these 1-based input line numbers
+    #   --limit  process only the first N records
+    line_filter: set[int] | None = None
+    if args.lines:
+        line_filter = {int(x) for x in args.lines.split(",") if x.strip()}
 
     for item in iter_jsonl(args.jsonl):
+        if line_filter is not None and item.lineno not in line_filter:
+            continue
+        if args.limit is not None and n_in >= args.limit:
+            break
         if item.error:
             log.add(lineno=item.lineno, status="error", error=item.error)
             n_fail += 1
@@ -143,10 +178,15 @@ def cmd_batch(args) -> int:
                         frontend, code, language, get_transform(name),
                         pick=args.pick, seed=args.seed, target_field=field,
                         compiler_validate=args.compiler_validate,
+                        input_kind="jsonl_field", source=field,
                     )
                     out_records.append(build_output_record(record, field, res))
+                    before = _first_before(res.selected_candidates)
                     log.add(lineno=item.lineno, field=field, transform=name,
-                            status=res.status, changed=res.changed, error=res.error)
+                            status=res.status, changed=res.changed, error=res.error,
+                            candidate_count=res.candidate_count,
+                            before_line=before.get("start_line"),
+                            relative_to=before.get("relative_to"))
                     n_out += 1
                     if res.status == "failed":
                         n_fail += 1
@@ -164,18 +204,47 @@ def cmd_batch(args) -> int:
                         frontend, current, language, get_transform(name),
                         pick=args.pick, seed=args.seed, target_field=field,
                         compiler_validate=args.compiler_validate,
+                        input_kind="jsonl_field", source=field,
                     )
                     statuses.append((name, res.status))
+                    # Keep the first transform that actually selected sites: its
+                    # input is the original code, so its BEFORE positions stay in
+                    # original coordinates.
+                    if not combined.selected_candidates and res.selected_candidates:
+                        combined.candidate_count = res.candidate_count
+                        combined.selected_candidates = res.selected_candidates
                     if res.status == "success":
                         current = res.transformed_code
                 combined.transformed_code = current
                 combined.changed = current != code
                 combined.status = "success" if combined.changed else "skipped"
                 combined.validation = {"per_transform": dict(statuses)}
+                combined.transformed_location = [
+                    s.to_dict() for s in changed_line_spans(code, current, field)
+                ]
                 out_records.append(build_output_record(record, field, combined))
                 log.add(lineno=item.lineno, field=field, transform=combined.name,
                         status=combined.status, changed=combined.changed)
                 n_out += 1
+
+    # --out '-' or 'stdout' streams the records to stdout for quick inspection
+    # instead of writing a file (run_log is only written if --log is given).
+    if args.out in ("-", "stdout"):
+        indent = 2 if args.pretty else None
+        for rec in out_records:
+            sys.stdout.write(json.dumps(rec, ensure_ascii=False, indent=indent) + "\n")
+        if args.log:
+            log.write(args.log)
+        print(
+            f"[batch] in={n_in} out_records={n_out} skipped={n_skip} failed={n_fail} "
+            f"-> stdout" + (f" (log: {args.log})" if args.log else ""),
+            file=sys.stderr,
+        )
+        if args.report:
+            generate_report(None, args.report, tab_size=frontend.tab_size,
+                            records=out_records)
+            print(f"[batch] report -> {args.report}", file=sys.stderr)
+        return 0
 
     write_jsonl(args.out, out_records)
     log_path = args.log or str(Path(args.out).with_name("run_log.jsonl"))
@@ -186,7 +255,7 @@ def cmd_batch(args) -> int:
         file=sys.stderr,
     )
     if args.report:
-        generate_report(args.out, args.report)
+        generate_report(args.out, args.report, tab_size=frontend.tab_size)
         print(f"[batch] report -> {args.report}", file=sys.stderr)
     return 0
 
@@ -217,7 +286,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     b = sub.add_parser("batch", help="transform a JSONL dataset")
     b.add_argument("--jsonl", required=True)
-    b.add_argument("--out", required=True)
+    b.add_argument("--out", required=True,
+                   help="output JSONL path, or '-'/'stdout' to print to stdout")
+    b.add_argument("--pretty", action="store_true",
+                   help="pretty-print JSON (indented); handy with --out -")
+    b.add_argument("--limit", type=int, default=None,
+                   help="process only the first N records (quick preview)")
+    b.add_argument("--lines", default=None,
+                   help="process only these 1-based input line numbers, e.g. '1,3,5'")
     b.add_argument("--transforms", default="all")
     b.add_argument("--fields", choices=["vuln", "fixed", "both"], default="vuln")
     b.add_argument("--mode", choices=["separate", "combined"], default="separate")

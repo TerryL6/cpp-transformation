@@ -31,10 +31,14 @@ class SrcmlFrontend(Frontend):
         srcml_bin: str | None = None,
         lib_path: str | None = None,
         timeout: float = 60.0,
+        tab_size: int = 8,
     ) -> None:
         self.srcml_bin = srcml_bin or os.environ.get("SRCML_BIN", "srcml")
         self.lib_path = lib_path or os.environ.get("SRCML_LIB")
         self.timeout = timeout
+        # Tab width used by srcML when computing columns under ``--position``.
+        # Recorded on every SourceLocation so consumers can interpret columns.
+        self.tab_size = tab_size
 
     # -- subprocess plumbing ------------------------------------------------
     def _env(self) -> dict[str, str]:
@@ -77,9 +81,17 @@ class SrcmlFrontend(Frontend):
         return _LANG_FLAG[key]
 
     # -- Frontend API -------------------------------------------------------
-    def parse(self, code: str, language: str) -> etree._Element:
+    def parse(
+        self, code: str, language: str, with_position: bool = False
+    ) -> etree._Element:
         lang = self._normalize_language(language)
-        xml = self._run(["--language", lang, "-"], code.encode("utf-8"))
+        args = ["--language", lang]
+        if with_position:
+            # ``--position`` emits pos:start/pos:end; ``--tabs`` fixes the tab
+            # width used for column computation so coordinates are reproducible.
+            args += ["--position", f"--tabs={self.tab_size}"]
+        args.append("-")
+        xml = self._run(args, code.encode("utf-8"))
         parser = etree.XMLParser(huge_tree=True, recover=False)
         try:
             root = etree.fromstring(xml, parser=parser)

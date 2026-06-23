@@ -11,9 +11,13 @@ Total records: 20
 
 n/a=13, passed=7
 
-## Compiler validation
+## Source locations
 
-skipped=7
+tab_size (run-level): 8
+
+Records with a captured before-location: 7/20; with an after-location: 7/20
+
+- relative_to (before): input=7
 
 ## Samples
 

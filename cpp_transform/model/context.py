@@ -43,10 +43,17 @@ class TransformContext:
         unit: etree._Element,
         language: str,
         frontend: Frontend,
+        input_kind: str = "snippet",
+        source: str | None = None,
     ) -> None:
         self.unit = unit
         self.language = language
         self.frontend = frontend
+        # What the input represents, for source-location semantics:
+        # "file" | "function" | "snippet" | "jsonl_field".
+        self.input_kind = input_kind
+        # File path (for "file") or JSONL field name (for "jsonl_field").
+        self.source = source
         self.names = NameGenerator(set(iter_names(unit)))
 
     def refresh_names(self) -> None:

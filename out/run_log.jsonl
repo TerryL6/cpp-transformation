@@ -1,20 +1,21 @@
-{"lineno": 1, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 1, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null}
-{"lineno": 2, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 2, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null}
-{"lineno": 3, "field": "func_vuln", "transform": "macro_alias", "status": "success", "changed": true, "error": null}
-{"lineno": 3, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 4, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 4, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 5, "field": "func_vuln", "transform": "macro_alias", "status": "success", "changed": true, "error": null}
-{"lineno": 5, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null}
-{"lineno": 6, "field": "func_vuln", "transform": "macro_alias", "status": "success", "changed": true, "error": null}
-{"lineno": 6, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 7, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 7, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 8, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 8, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 9, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 9, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null}
-{"lineno": 10, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates"}
-{"lineno": 10, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates"}
+{"event": "run_meta", "tab_size": 8, "transforms": ["macro_alias", "variable_chain"], "fields": "vuln", "mode": "separate"}
+{"lineno": 1, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 1, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null, "candidate_count": 8, "before_line": 10, "relative_to": "input"}
+{"lineno": 2, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 2, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null, "candidate_count": 3, "before_line": 5, "relative_to": "input"}
+{"lineno": 3, "field": "func_vuln", "transform": "macro_alias", "status": "success", "changed": true, "error": null, "candidate_count": 1, "before_line": 141, "relative_to": "input"}
+{"lineno": 3, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 4, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 4, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 5, "field": "func_vuln", "transform": "macro_alias", "status": "success", "changed": true, "error": null, "candidate_count": 3, "before_line": 46, "relative_to": "input"}
+{"lineno": 5, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null, "candidate_count": 1, "before_line": 43, "relative_to": "input"}
+{"lineno": 6, "field": "func_vuln", "transform": "macro_alias", "status": "success", "changed": true, "error": null, "candidate_count": 3, "before_line": 31, "relative_to": "input"}
+{"lineno": 6, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 7, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 7, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 8, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 8, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 9, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 9, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null, "candidate_count": 1, "before_line": 4, "relative_to": "input"}
+{"lineno": 10, "field": "func_vuln", "transform": "macro_alias", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}
+{"lineno": 10, "field": "func_vuln", "transform": "variable_chain", "status": "skipped", "changed": false, "error": "no_candidates", "candidate_count": 0, "before_line": null, "relative_to": null}

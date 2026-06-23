@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .codegen import unparse as do_unparse
 from .frontends.base import Frontend, FrontendError
+from .location.model import apply_input_context, changed_line_spans
 from .model.context import TransformContext
 from .model.result import TransformResult
 from .pick.strategies import get_strategy
@@ -25,6 +26,8 @@ def apply_transform(
     seed: int | None = 42,
     target_field: str | None = None,
     compiler_validate: bool = False,
+    input_kind: str = "snippet",
+    source: str | None = None,
 ) -> TransformResult:
     result = TransformResult(
         name=transform.name,
@@ -36,14 +39,20 @@ def apply_transform(
         transformed_code=code,
     )
 
-    # -- parse --------------------------------------------------------------
+    # -- parse (with positions so locators can capture source locations) ----
     try:
-        unit = frontend.parse(code, language)
+        unit = frontend.parse(code, language, with_position=True)
     except FrontendError as exc:
         result.status = "failed"
         result.error = f"parse error: {exc}"
         return result
-    ctx = TransformContext(unit, language, frontend)
+    ctx = TransformContext(
+        unit,
+        language,
+        frontend,
+        input_kind=input_kind,
+        source=source,
+    )
 
     # -- locate + pick ------------------------------------------------------
     candidates = transform.find_candidates(ctx)
@@ -51,12 +60,19 @@ def apply_transform(
         result.status = "skipped"
         result.error = "no_candidates"
         return result
+    result.candidate_count = len(candidates)
+    # Enrich each eagerly-captured BEFORE position with input context
+    # (source + relative_to) before any tree mutation makes the srcML pos:*
+    # attributes stale.
+    for cand in candidates:
+        if cand.source_location is not None:
+            apply_input_context(cand.source_location, input_kind, source)
     chosen = get_strategy(pick)(candidates, seed)
     if not chosen:
         result.status = "skipped"
         result.error = "pick_selected_none"
         return result
-    result.candidate = chosen[0].to_dict()
+    result.selected_candidates = [c.to_dict(slim=True) for c in chosen]
 
     # -- transform (tree mutation) -----------------------------------------
     try:
@@ -102,6 +118,11 @@ def apply_transform(
         result.status = "success"
         result.changed = True
         result.transformed_code = transformed
+        # AFTER location (Option B): the changed line ranges in transformed-output
+        # coordinates, derived by diff (transform-agnostic, line-level only).
+        result.transformed_location = [
+            s.to_dict() for s in changed_line_spans(code, transformed, source)
+        ]
     else:
         result.status = "failed"
         result.transformed_code = code  # rollback

@@ -33,11 +33,20 @@ def _diff(original: str, transformed: str, name: str) -> str:
     return "\n".join(lines)
 
 
-def generate_report(input_path: str | Path, output_path: str | Path, max_samples: int = 10) -> str:
-    records = _load(input_path)
+def generate_report(
+    input_path: str | Path | None,
+    output_path: str | Path,
+    max_samples: int = 10,
+    tab_size: int | None = None,
+    records: list[dict] | None = None,
+) -> str:
+    records = records if records is not None else _load(input_path)
     status_by_transform: dict[str, Counter] = defaultdict(Counter)
     reparse = Counter()
     compiler = Counter()
+    loc_relative_to = Counter()
+    loc_with_before = 0
+    loc_with_after = 0
 
     for rec in records:
         meta = rec.get("transform") or {}
@@ -47,6 +56,13 @@ def generate_report(input_path: str | Path, output_path: str | Path, max_samples
         reparse[(val.get("srcml_reparse") or {}).get("status", "n/a")] += 1
         if "compiler" in val:
             compiler[val["compiler"].get("status", "n/a")] += 1
+        selected = meta.get("selected_candidates") or []
+        before = (selected[0].get("source_location") if selected else None) or {}
+        if before:
+            loc_with_before += 1
+            loc_relative_to[before.get("relative_to", "n/a")] += 1
+        if meta.get("transformed_location"):
+            loc_with_after += 1
 
     lines: list[str] = ["# cpp_transform report", ""]
     lines.append(f"Total records: {len(records)}")
@@ -67,6 +83,22 @@ def generate_report(input_path: str | Path, output_path: str | Path, max_samples
         lines.append("")
         lines.append(", ".join(f"{k}={v}" for k, v in sorted(compiler.items())))
         lines.append("")
+
+    lines.append("## Source locations")
+    lines.append("")
+    if tab_size is not None:
+        lines.append(f"tab_size (run-level): {tab_size}")
+        lines.append("")
+    lines.append(
+        f"Records with a captured before-location: {loc_with_before}/{len(records)}; "
+        f"with an after-location: {loc_with_after}/{len(records)}"
+    )
+    lines.append("")
+    lines.append(
+        "- relative_to (before): "
+        + (", ".join(f"{k}={v}" for k, v in sorted(loc_relative_to.items())) or "n/a")
+    )
+    lines.append("")
 
     lines.append("## Samples")
     lines.append("")

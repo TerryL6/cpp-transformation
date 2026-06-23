@@ -18,8 +18,15 @@ class FrontendError(RuntimeError):
 
 class Frontend(ABC):
     @abstractmethod
-    def parse(self, code: str, language: str) -> etree._Element:
-        """Parse ``code`` and return the root ``<unit>`` element (mutable)."""
+    def parse(
+        self, code: str, language: str, with_position: bool = False
+    ) -> etree._Element:
+        """Parse ``code`` and return the root ``<unit>`` element (mutable).
+
+        When ``with_position`` is True the backend annotates nodes with source
+        position metadata (line/column). These attributes are read eagerly at
+        locate time and are *not* relied upon after the tree is mutated.
+        """
 
     @abstractmethod
     def unparse(self, unit: etree._Element) -> str:

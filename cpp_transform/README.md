@@ -125,15 +125,43 @@ python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl \
     --mode separate --report out/report.md
 
 # vuln + fixed fields, stack all transforms sequentially, with compiler check
-python3 -m cpp_transform.cli batch --jsonl data.jsonl --out out/t.jsonl \
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out out/transformed.jsonl \
     --transforms variable_chain,macro_alias --fields both \
-    --mode combined --compiler-validate --log out/mylog.jsonl
+    --mode combined --compiler-validate --log out/run_log.jsonl
+
+# quick look: stream pretty-printed records to stdout (no files written)
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --pretty \
+    --transforms variable_chain --fields vuln
+
+# inspect only ONE input line (e.g. the 3rd record) and print its transform block:
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --lines 3 \
+    --transforms variable_chain --fields vuln 2>/dev/null | jq '.transform'
+
+# inspect a few specific lines at once (1st, 3rd, 5th):
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --lines 1,3,5 \
+    --transforms variable_chain --fields vuln 2>/dev/null | jq '.transform.transformed_location'
+
+# just the first N records (quick smoke test):
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --limit 2 \
+    --transforms variable_chain --fields vuln 2>/dev/null | jq '{field: .transform.target_field, changed: .transform.changed}'
+
+# compare input vs output code for one line, side by side:
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --lines 3 \
+    --transforms variable_chain --fields vuln 2>/dev/null \
+    | jq -r '"--- INPUT ---\n" + .func_vuln_original + "\n--- OUTPUT ---\n" + .func_vuln'
 ```
+
+> `2>/dev/null` hides srcML's stderr noise so only the JSONL reaches `jq`. The
+> `func_vuln_original` field holds the untouched input; `func_vuln` holds the
+> transformed code (field names mirror whatever code field was transformed).
 
 | Option | Value / default | Meaning |
 | --- | --- | --- |
 | `--jsonl` | path / **required** | Input JSONL dataset, one JSON record per line. |
-| `--out` | path / **required** | Output path for the transformed JSONL (parent dirs auto-created). |
+| `--out` | path or `-`/`stdout` / **required** | Output path for the transformed JSONL (parent dirs auto-created). Use `-` or `stdout` to stream records to stdout instead of writing a file (handy for a quick look). |
+| `--pretty` | flag / default off | Pretty-print (indent) the JSON. Most useful with `--out -`; with a file it just makes the JSONL multi-line. |
+| `--lines` | comma-separated 1-based line numbers / default: all | Process only these input lines (matches the line number in the JSONL file). Great for inspecting one record's output, e.g. `--lines 3` or `--lines 1,3,5`. |
+| `--limit` | int / default: all | Process only the first N records (quick smoke test / preview). |
 | `--transforms` | name(s), comma-separated, or `all` / default `all` | Set of transforms to apply. |
 | `--fields` | `vuln`/`fixed`/`both` / default `vuln` | Which code fields to transform. `vuln`→`func_vuln`/`vuln_func`; `fixed`→`func_fixed`/`fixed_func`; `both`→both. |
 | `--mode` | `separate`/`combined` / default `separate` | `separate`: one record per (field × transform); `combined`: stack all transforms **sequentially** on the same field into one record. |
@@ -141,14 +169,65 @@ python3 -m cpp_transform.cli batch --jsonl data.jsonl --out out/t.jsonl \
 | `--seed` | int / default `42` | Random seed (reproducible). |
 | `--language` | `C`/`C++` / default: inferred per record | Force the language for **all** records; otherwise inferred as `language field > file extension`. Records that cannot be resolved are marked `skipped` and the batch continues. |
 | `--report` | path / default: none | Also generate a Markdown report (status summary + unified diffs). |
-| `--log` | path / default: `run_log.jsonl` next to `--out` | Run-log path; one structured line per attempt. |
+| `--log` | path / default: `run_log.jsonl` next to `--out` | Run-log path; one structured line per attempt (first line is a `run_meta` entry with the run-level `tab_size`). When `--out` is stdout, the run log is **skipped** unless `--log` is given explicitly. |
 | `--compiler-validate` | flag / default off | Enable the compiler syntax-check layer. |
 | `--srcml-bin` / `--srcml-lib` | same as `file` | srcml binary and library paths. |
 
-**Output record schema** (separate mode): keeps all original record fields and adds:
-- `<field>` replaced with the transformed code;
-- `<field>_original` holding the original code;
-- `transform` metadata (name/family/status/seed/language/changed/candidate/validation/error).
+**Output record schema** (separate mode): every original record field is kept,
+and three things are added/replaced:
+- `<field>` — replaced with the **transformed** code (e.g. `func_vuln`);
+- `<field>_original` — the **original** code (e.g. `func_vuln_original`);
+- `transform` — a metadata block describing the attempt.
+
+The `transform` block looks like this:
+
+```jsonc
+"transform": {
+  "name": "variable_chain",        // transform name ("a+b" / "combined" in combined mode)
+  "family": "dataflow",
+  "status": "success",             // success | skipped | failed
+  "seed": 42,
+  "target_field": "func_vuln",     // which field was transformed
+  "language": "C",
+  "changed": true,
+  "error": null,                   // reason when skipped/failed (e.g. "no_candidates")
+
+  "candidate_count": 3,            // total candidates located (selected + not)
+
+  "selected_candidates": [         // the candidates actually changed (slim view)
+    {
+      "cid": "decl:0",
+      "node_type": "decl_stmt",
+      "enclosing_function": "compute",
+      "original_text": "int x = a;",
+      "source_location": {         // BEFORE location (precise, per candidate)
+        "source": "func_vuln", "relative_to": "input",
+        "start_line": 3, "start_col": 5, "end_line": 3, "end_col": 14
+      }
+    }
+  ],
+
+  "transformed_location": [        // AFTER: changed line ranges (diff hunks)
+    { "source": "func_vuln", "relative_to": "output",
+      "start_line": 3, "start_col": null, "end_line": 3, "end_col": null }
+  ],
+
+  "validation": {                  // each layer reported separately
+    "srcml_reparse": { "status": "passed" },
+    "structural":    { "status": "passed" },
+    "applied":       { "status": "passed" },
+    "compiler":      { "status": "passed" }   // only with --compiler-validate
+  }
+}
+```
+
+See [Source-location tracking](#source-location-tracking) for field meanings.
+In **combined mode** the single `transform` block uses `family: "combined"`,
+`validation.per_transform` (a per-transform status map), and `candidate_count` /
+`selected_candidates` taken from the first transform that selected sites.
+
+Alongside the output JSONL, `batch` writes `run_log.jsonl` (one line per attempt;
+its first line is a `run_meta` entry recording the run-level `tab_size`).
 
 stderr prints a summary: `in=` records read, `out_records=` records produced,
 `skipped=`, `failed=`.
@@ -169,7 +248,9 @@ python3 -m cpp_transform.cli report --input out/transformed.jsonl \
 | `--max-samples` | int / default `10` | Number of leading before/after diff samples to show. |
 
 Report contents: status counts per transform, srcML reparse pass rate, compiler
-validation outcome distribution, and unified diffs for the first N samples.
+validation outcome distribution, a **Source locations** summary (before/after
+coverage plus `basis` and `mapping_status` distributions), and unified diffs for
+the first N samples.
 
 ---
 
@@ -211,6 +292,65 @@ stderr prints a summary: total / exact / normalized / reparse_ok counts.
 | --- | --- |
 | `0` | Success (in batch, a single failed record does not change the exit code; it is isolated and recorded in `run_log.jsonl`). |
 | `2` | `file` could not resolve the language (no `--language` and no inferable file name). |
+
+## Source-location tracking
+
+Every transform records **where** the code it touched lives. The main tree is
+parsed with srcML `--position`, and each candidate's line/column span is captured
+**eagerly at locate time** (frozen into a value object), because srcML position
+attributes go stale once the tree is mutated. This uses a single tree (no
+separate "position tree"); the feasibility study confirmed position attributes do
+not affect unparsing.
+
+Two kinds of location are recorded:
+
+- **Before** — where each *selected* candidate sat in the input. Read straight
+  from srcML positions, so it is **precise (line + column), one per candidate**.
+  Lives inside each entry of `selected_candidates` as its `source_location`.
+- **After** — where the change landed in the regenerated code. Positions can't be
+  read from the mutated tree, so this is derived by **line-diffing** the original
+  vs. transformed source. It is a **list of changed line ranges** (line-level
+  only, columns `null`), in `transformed_location`.
+
+The before location is also visible per-candidate via `file --dump-candidates`.
+
+### `SourceLocation` fields (6)
+
+| Field | Meaning |
+| --- | --- |
+| `source` | Where the code came from: a file path (file input) or a JSONL field name like `func_vuln`. |
+| `relative_to` | Which coordinate system the numbers are in (see below). |
+| `start_line` / `start_col` | Start of the span, both **1-based**. |
+| `end_line` / `end_col` | End of the span (inclusive). Columns are `null` for `transformed_location` (line-level only). |
+
+**`relative_to`** — the coordinate system:
+
+| Value | Meaning |
+| --- | --- |
+| `input` | Relative to the extracted snippet/field handed in (line 1 = its first line); no repo anchor. |
+| `file` | Relative to a concrete file given as input — a real file location. |
+| `output` | Relative to the transformed output (used by `transformed_location`). |
+| `repo` | Lifted to a real repository file. **Reserved for V3**; not produced yet. |
+
+### What you get per input type
+
+| Input | before `relative_to` |
+| --- | --- |
+| `file --input foo.c` | `file` |
+| `file` via stdin (snippet) | `input` |
+| `batch` JSONL field (e.g. `func_vuln`) | `input` |
+
+Recovering true **repository** line numbers from a function/field (using the
+dataset's file/commit anchors) is intentionally deferred to **V3**. Note also
+that `line_changes.line_no` in SVEN-style datasets is *function-relative*, which
+is exactly the gap V3's reverse mapping will close.
+
+**Notes**
+- `tab_size` is a run-level constant (default 8), not repeated on every location;
+  it is recorded once in `run_log.jsonl`'s `run_meta` line and in the report.
+- `transformed_location` is a transform-agnostic line diff, so it reports changed
+  **line ranges** only. A pure deletion is recorded as a zero-width point. Column-
+  precise after-positions would require reparsing the output (possible future add).
 
 ## Validation layers (kept separate, not conflated)
 

@@ -7,16 +7,16 @@ todos:
     status: completed
   - id: single-vs-dual-decision
     content: 基于研究结果在单树/双树间决策;若需双树,落地"干净树 locate + 位置 sidecar + 结构索引路径映射";位置在 locate 时即时固化为 SourceLocation 值对象
-    status: pending
+    status: completed
   - id: location-model
     content: 实现 SourceLocation 模型与 input/original/transformed/repo basis、mapping_status,修正 source_location 解析(start+end),frontend 增加 with_position 选项
-    status: pending
+    status: completed
   - id: location-flow
     content: 让位置信息贯穿 locate/pick/transform/unparse/report,扩展输出 JSONL 与报告,定义文件/函数/片段/JSONL 字段语义与仓库行号恢复规则
-    status: pending
+    status: completed
   - id: output-location-extension
     content: 扩展 TransformResult/run_log/report 的 locations 字段与位置可恢复率汇总
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -24,6 +24,39 @@ isProject: false
 
 > 约束遵守:本方案**不修改任何现有代码**。lxml 仍是默认且唯一的改写后端。
 > 拆分说明:本 V2 **只覆盖源位置追踪**;仓库级编译验证已拆分到 **V3**(`framework_plan_v3_*`)。V3 的"定位文件与代码位置/行号反向映射"依赖本 V2 的位置模型。
+
+---
+
+## 0. 实施状态(✅ 已完成 — 2026-06,含评审后精简)
+
+本方案已实现并通过全部 36 个测试。决策:**采用方案 A(单树)**——可行性研究证实位置属性对 mutation/unparse **零干扰**,无需双树;`SourceLocation` 在 locate 时即时固化(改树前)。
+
+**评审后的最终数据模型(已精简,9 字段 → 6 字段)**
+
+- `SourceLocation`(6 字段):`source`(文件路径或 JSONL 字段名)、`relative_to`(`input` | `file` | `output` | `repo`)、`start_line/start_col/end_line/end_col`(1-based)。
+  - 合并:旧 `basis` + `mapping_status` → 单一 `relative_to`;重命名:`path_or_field` → `source`。
+  - 删除:`confidence`(死字段)。移走:`tab_size` → **run-level**(`run_log.jsonl` 的 `run_meta` 行 + 报告各一处)。
+- `transform` 块(扁平化,去掉 `locations` 子块):
+  - `candidate_count`:定位到的候选总数(选中+未选中)。
+  - `selected_candidates`:被改候选的**瘦身**结构化描述(`cid`/`node_type`/`enclosing_function`/`original_text`/`source_location`);**改前位置**即每个候选的 `source_location`(精确、按候选)。
+  - `transformed_location`:**改后位置 = 改动行段列表(B 档)**,由 `changed_line_spans` 对 原文/输出 行级 diff 得到,`relative_to=output`,列号留空;纯删除记为零宽度点。
+- **去重**:旧设计把"改前位置"存了三遍(`candidate`/`selected[0]`/`original`),现合并为"每个选中候选自带 `source_location`",一处真相。
+
+**各文件改动**
+
+- **新增** [location/model.py](cpp_transform/location/model.py) + [__init__.py](cpp_transform/location/__init__.py):`SourceLocation`、`from_srcml_node()`、`apply_input_context()`、`changed_line_spans()`。
+- **frontend**:`parse(..., with_position=False)`,带位置附加 `--position --tabs=N`;`tab_size` 仍是 frontend 配置(默认 8)。
+- **pipeline**:带位置解析 → 富集改前位置 → mutate → unparse → 填 `candidate_count`/`selected_candidates`/`transformed_location`。
+- **cli**:区分输入语义(`file`/`snippet`/`jsonl_field`);run_log 增 `candidate_count`/`before_line`/`relative_to`,并写 run-level `tab_size` 的 `run_meta`;combined 模式聚合。
+- **report**:「Source locations」小节(before/after 覆盖率 + `relative_to` 分布 + `tab_size`)。
+- [io/writer.py](cpp_transform/io/writer.py) **无需改动**:随 `TransformResult.to_dict()` 自动落盘。
+
+**关键语义与定稿**
+
+- 输入语义:`file` 输入 → 改前 `relative_to=file`;`function/snippet/jsonl_field` → `relative_to=input`(**不编造**仓库行号)。
+- **仓库行号恢复(`relative_to=repo`)推迟到 V3**(需数据集文件/commit 锚点;`line_changes.line_no` 是函数相对的,正是 V3 要补的缺口)。
+- 改后位置定位为**行级、用于报告 + V3 报错归因**;检测评估按 repo/函数级,不需要列级精确的"按候选改后位置"。
+- 开放问题定稿:默认 `--tabs=8`;主战场 **WSL**;方案 A 无 sidecar 性能问题。
 
 ---
 

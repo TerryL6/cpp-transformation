@@ -1,20 +1,20 @@
-{"lineno": 1, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 1, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 2, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 2, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 3, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 3, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 4, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 4, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 5, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 5, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 6, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 6, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 7, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 7, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 8, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 8, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 9, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 9, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 10, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
-{"lineno": 10, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null, "compiler": {"status": "skipped", "tool": "gcc", "original_rc": 1, "transformed_rc": 1}}
+{"lineno": 1, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 1, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 2, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 2, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 3, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 3, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 4, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 4, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 5, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 5, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 6, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 6, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 7, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 7, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 8, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 8, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 9, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 9, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 10, "field": "func_vuln", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
+{"lineno": 10, "field": "func_fixed", "language": "C", "exact_equal": true, "normalized_equal": true, "reparse_ok": true, "error": null}
