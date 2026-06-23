@@ -171,6 +171,10 @@ python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --lines 
 | `--report` | path / default: none | Also generate a Markdown report (status summary + unified diffs). |
 | `--log` | path / default: `run_log.jsonl` next to `--out` | Run-log path; one structured line per attempt (first line is a `run_meta` entry with the run-level `tab_size`). When `--out` is stdout, the run log is **skipped** unless `--log` is given explicitly. |
 | `--compiler-validate` | flag / default off | Enable the compiler syntax-check layer. |
+| `--repo-validate` | flag / default off | After a successful transform, run **repository-level compilation validation** (V3): clone/checkout the real repo, plug the transformed function back, and build. See [below](#repository-level-compilation-validation-v3). |
+| `--repo-cache` | path / default `~/.cache/cpp_transform/repos` | Where full clones are cached (one per repo, reused across runs). |
+| `--repo-build-timeout` | int seconds / default `600` | Per-command build timeout. Large repos (e.g. FFmpeg) may need a higher value. |
+| `--repo-log-dir` | path / default: none | Directory to write combined baseline+transformed build logs (one file per record). |
 | `--srcml-bin` / `--srcml-lib` | same as `file` | srcml binary and library paths. |
 
 **Output record schema** (separate mode): every original record field is kept,
@@ -212,14 +216,34 @@ The `transform` block looks like this:
       "start_line": 3, "start_col": null, "end_line": 3, "end_col": null }
   ],
 
-  "validation": {                  // each layer reported separately
+  "validation": {                  // SNIPPET-level checks (each layer separate)
     "srcml_reparse": { "status": "passed" },
     "structural":    { "status": "passed" },
     "applied":       { "status": "passed" },
     "compiler":      { "status": "passed" }   // only with --compiler-validate
+  },
+
+  "repo_validation": {             // WHOLE-REPO build (only with --repo-validate);
+    "project": "FFmpeg",           // sibling of validation, NOT nested inside it
+    "commit": "a7e032a...",        // record's commit_id (the FIX commit)
+    "checkout_revision": "a7e032a...^1",   // parent (vulnerable) for func_vuln
+    "commit_sha": "2b46ebd...",    // resolved 40-char SHA
+    "file": "libavformat/rmdec.c",
+    "func": "rm_read_multi",
+    "recipe": "FFmpeg",            // override name or detected (cmake/autotools/make)
+    "matched_span": { "file": "libavformat/rmdec.c", "start_line": 491, "end_line": 530 },
+    "build_log_ref": "out/.../rmdec.c..._func_vuln.log",  // only with --repo-log-dir
+    "status": "passed",            // see the V3 status enum
+    "baseline_status": "passed",   // build of the UNMODIFIED checkout
+    "mapping_status": "exact",     // how the function was matched (exact|normalized)
+    "detail": null                 // extra reason for non-passed / edge cases
   }
 }
 ```
+
+> `repo_validation` is present only when `--repo-validate` is passed; see
+> [Repository-level compilation validation (V3)](#repository-level-compilation-validation-v3)
+> for the full field reference and status enum.
 
 See [Source-location tracking](#source-location-tracking) for field meanings.
 In **combined mode** the single `transform` block uses `family: "combined"`,
@@ -360,3 +384,129 @@ is exactly the gap V3's reverse mapping will close.
   isolated snippets that cannot compile are reported `skipped`, not `failed`.
 - **assumed semantic / vulnerability preservation**: assumed by construction,
   to be checked empirically later with CodeQL / LLM detectors (not proven here).
+
+## Repository-level compilation validation (V3)
+
+The lightweight validators above check a **snippet** in isolation. V3 adds a
+stronger, optional check: does the transformed function still compile **inside
+its real project**? It is enabled per `batch` run with `--repo-validate` and
+runs only after a transform succeeds and actually changes code.
+
+### What it does (per record)
+
+1. **Metadata** — read `project` / `project_url` / `commit_id` / `file_name` /
+   `func_name` from the record.
+2. **Provision** — clone the repo **once** into the cache
+   (`--repo-cache`), then create an isolated **git worktree** for this record so
+   edits never touch the cache or other records.
+3. **Checkout** — for `func_vuln` we check out the **parent** of the fix commit
+   (`commit_id^1`, the vulnerable revision); for `func_fixed` we check out
+   `commit_id` itself. (SVEN convention: `commit_id` is the *fix* commit.)
+4. **Baseline build** — build the unmodified checkout first. Its result is the
+   reference point.
+5. **Placement** — locate the original whole function in `file_name` and replace
+   it with the transformed function. A non-unique / fuzzy match is **not**
+   patched (reported `skipped_ambiguous`).
+6. **Transformed build** — rebuild (incremental) and compare to the baseline.
+7. **Classify & log** — emit a status and, with `--repo-log-dir`, write the
+   combined baseline+transformed build output.
+
+Why a baseline: it separates *"the repo never built here in the first place"*
+from *"the transform broke it"* — only the latter is a real regression.
+
+### Status enum (`repo_validation.status`)
+
+| Status | Meaning |
+| --- | --- |
+| `passed` | Baseline built **and** the transformed tree built. The real win. |
+| `failed` | Baseline built but the transformed tree failed → **transform-introduced regression**. |
+| `baseline_failed` | The unmodified checkout did not build in this environment; nothing is attributed to the transform. |
+| `skipped_ambiguous` | The function could not be uniquely located in the file; no patch applied. |
+| `skipped_no_repo` | Missing/unsupported repo metadata. |
+| `environment_error` | No usable build recipe, or a git/clone/tooling failure. |
+| `timeout` | A build command exceeded `--repo-build-timeout`. |
+| `not_attempted` | Transform did not change code, so repo validation was skipped. |
+
+### The `repo_validation` block
+
+The full result is attached as **`transform.repo_validation`** — a **sibling of
+`transform.validation`**, not nested inside it (`validation` = snippet-level
+checks; `repo_validation` = whole-repository build). Inspect it with
+`jq '.transform.repo_validation'`. Example:
+
+```jsonc
+"repo_validation": {
+  "project": "FFmpeg",
+  "commit": "a7e032a277452366771951e29fd0bf2bd5c029f0",
+  "checkout_revision": "a7e032a277452366771951e29fd0bf2bd5c029f0^1",
+  "commit_sha": "2b46ebdbff1d8dec7a3d8ea280a612b91a582869",
+  "file": "libavformat/rmdec.c",
+  "func": "rm_read_multi",
+  "recipe": "FFmpeg",
+  "matched_span": { "file": "libavformat/rmdec.c", "start_line": 491, "end_line": 530 },
+  "build_log_ref": "out/ffmpeg_demo_logs/github.com_FFmpeg_FFmpeg_a7e032a27745_func_vuln.log",
+  "status": "passed",
+  "baseline_status": "passed",
+  "mapping_status": "exact",
+  "detail": null
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `project` | Project name from the record. |
+| `commit` | The record's `commit_id` (SVEN convention: the **fix** commit). |
+| `checkout_revision` | The revision actually checked out: `commit_id^1` (parent, vulnerable) for `func_vuln`, `commit_id` for `func_fixed`. |
+| `commit_sha` | The concrete 40-char SHA that `checkout_revision` resolved to (added once provisioning succeeds). |
+| `file` | Target source file (`file_name`) the function lives in. |
+| `func` | Target function name (`func_name`) that was replaced. |
+| `recipe` | Build recipe used: an override name (e.g. `FFmpeg`, `oniguruma`) or a detected one (`autotools` / `cmake` / `make`); `null` if none was found. |
+| `matched_span` | Where the function was located **and replaced** in `file`: `{file, start_line, end_line}` (1-based, repo coordinates). `null` if it was never placed (baseline failed / ambiguous / skipped). |
+| `build_log_ref` | Path to the combined baseline+transformed build log (only when `--repo-log-dir` is set); else `null`. |
+| `status` | Final outcome — one of the [status enum](#status-enum-repo_validationstatus) values above. |
+| `baseline_status` | Build result of the **unmodified** checkout: `passed` / `failed` / `timeout` / `error`, or `null` if a build was never started. |
+| `mapping_status` | How the function was matched for placement: `exact` (byte-for-byte) or `normalized` (trailing-whitespace-insensitive); `null` if not placed. |
+| `detail` | Extra reason text for non-`passed` / edge cases, e.g. `baseline_failed`, `transformed_stage=build[1]`, `merge_commit`, `no_build_system`, `baseline_timeout`. `null` when there is nothing to add. |
+
+The report also adds a **Repository validation** outcome count.
+
+### Build recipes (auto-detect first, declarative fallback)
+
+A recipe is `setup` commands (configure / cmake) then `build` commands (make),
+each an argv list run without a shell. Resolution order:
+
+1. **Per-project override** — a small declarative table in
+   `cpp_transform/repo/recipes.py` (`RECIPE_OVERRIDES`) for repos whose build
+   quirks cannot be auto-detected. Adding a repo is **one row**, e.g. FFmpeg:
+   `./configure --disable-asm` then `make` (the flag drops the nasm/yasm and old
+   x86 inline-asm requirements so it builds C-only, no sudo).
+2. **Auto-detection** — otherwise detected from marker files: `configure` /
+   `autogen.sh` / `configure.ac` (autotools) → `CMakeLists.txt` (cmake) → a
+   top-level `Makefile`. Unknown build systems yield `environment_error`.
+
+### Example (worked, real)
+```bash
+export SRCML_BIN=$HOME/srcml/bin/srcml SRCML_LIB=$HOME/srcml/lib
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --lines 9 \
+    --transforms variable_chain --fields vuln \
+    --repo-validate --repo-build-timeout 2400 \
+    2>/dev/null | jq '.transform.repo_validation'
+```
+
+```bash
+export SRCML_BIN=$HOME/srcml/bin/srcml SRCML_LIB=$HOME/srcml/lib
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --lines 9 \
+    --transforms variable_chain --fields vuln \
+    --repo-validate --repo-build-timeout 2400 \
+    --out out/ffmpeg_demo.jsonl --log out/ffmpeg_demo_run_log.jsonl \
+    --report out/ffmpeg_demo_report.md --repo-log-dir out/ffmpeg_demo_logs
+```
+
+Record 9 is FFmpeg `rm_read_multi` in `libavformat/rmdec.c`. `variable_chain`
+rewrites `int number_of_streams = avio_rb16(pb);` into a two-step chain; the
+modified function is plugged back at the parent commit; baseline builds, the
+transformed tree builds → `repo_validation = passed`.
+
+> Requirements: a working build toolchain (gcc/make, plus cmake for cmake repos)
+> and network access for the initial clone. No Docker is used in V3 phases 1–4;
+> WSL is the reference environment.

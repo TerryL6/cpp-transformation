@@ -1,0 +1,2 @@
+{"event": "run_meta", "tab_size": 8, "transforms": ["variable_chain"], "fields": "vuln", "mode": "separate"}
+{"lineno": 9, "field": "func_vuln", "transform": "variable_chain", "status": "success", "changed": true, "error": null, "candidate_count": 1, "before_line": 4, "relative_to": "input", "repo_validation": "passed"}

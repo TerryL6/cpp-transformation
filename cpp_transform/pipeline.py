@@ -145,3 +145,30 @@ def t_check(transform: Transformation, cand, ctx: TransformContext) -> bool:
         return transform.structural_check(cand, ctx)
     except Exception:
         return False
+
+
+def run_repo_validation(result: TransformResult, record: dict, config) -> None:
+    """Attach repository-level validation to ``result`` (V3, opt-in).
+
+    Runs only when the lightweight transform actually changed code, since there
+    is otherwise nothing to place back. Best-effort: any unexpected error is
+    recorded as ``environment_error`` rather than breaking the batch. The repo
+    subsystem is imported lazily so the core pipeline never depends on it.
+    """
+    if not (result.status == "success" and result.changed):
+        return
+    from .repo.validate import validate_record
+
+    try:
+        result.repo_validation = validate_record(
+            record=record,
+            target_field=result.target_field,
+            original_code=result.original_code,
+            transformed_code=result.transformed_code,
+            config=config,
+        )
+    except Exception as exc:  # never let repo validation crash the batch
+        result.repo_validation = {
+            "status": "environment_error",
+            "detail": f"unexpected: {exc}",
+        }

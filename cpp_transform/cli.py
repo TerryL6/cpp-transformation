@@ -26,7 +26,7 @@ from .io.dataset import detect_code_fields, detect_language, iter_jsonl
 from .io.writer import RunLog, build_output_record, write_jsonl
 from .location.model import apply_input_context, changed_line_spans
 from .model.context import TransformContext
-from .pipeline import apply_transform
+from .pipeline import apply_transform, run_repo_validation
 from .report import generate_report
 from .transforms.base import REGISTRY, get_transform
 
@@ -123,6 +123,19 @@ def cmd_batch(args) -> int:
     names = resolve_transforms(args.transforms)
     out_records: list[dict] = []
     log = RunLog()
+
+    # V3 (opt-in): repository-level compilation validation. Config is built only
+    # when --repo-validate is set, so the repo subsystem stays untouched / unused
+    # by default.
+    repo_config = None
+    if args.repo_validate:
+        from .repo.validate import RepoValidateConfig
+
+        repo_config = RepoValidateConfig(
+            cache_root=args.repo_cache or RepoValidateConfig.cache_root,
+            build_timeout=args.repo_build_timeout,
+            log_dir=args.repo_log_dir,
+        )
     n_in = n_out = n_skip = n_fail = 0
     # Run-level metadata: tab_size is constant for the whole run, so it is
     # recorded once here rather than on every SourceLocation. It tells consumers
@@ -180,13 +193,17 @@ def cmd_batch(args) -> int:
                         compiler_validate=args.compiler_validate,
                         input_kind="jsonl_field", source=field,
                     )
+                    if repo_config is not None:
+                        run_repo_validation(res, record, repo_config)
                     out_records.append(build_output_record(record, field, res))
                     before = _first_before(res.selected_candidates)
+                    repo_status = (res.repo_validation or {}).get("status")
                     log.add(lineno=item.lineno, field=field, transform=name,
                             status=res.status, changed=res.changed, error=res.error,
                             candidate_count=res.candidate_count,
                             before_line=before.get("start_line"),
-                            relative_to=before.get("relative_to"))
+                            relative_to=before.get("relative_to"),
+                            repo_validation=repo_status)
                     n_out += 1
                     if res.status == "failed":
                         n_fail += 1
@@ -222,9 +239,12 @@ def cmd_batch(args) -> int:
                 combined.transformed_location = [
                     s.to_dict() for s in changed_line_spans(code, current, field)
                 ]
+                if repo_config is not None:
+                    run_repo_validation(combined, record, repo_config)
                 out_records.append(build_output_record(record, field, combined))
                 log.add(lineno=item.lineno, field=field, transform=combined.name,
-                        status=combined.status, changed=combined.changed)
+                        status=combined.status, changed=combined.changed,
+                        repo_validation=(combined.repo_validation or {}).get("status"))
                 n_out += 1
 
     # --out '-' or 'stdout' streams the records to stdout for quick inspection
@@ -303,6 +323,15 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--report", help="also write a markdown report here")
     b.add_argument("--log", help="run log path (default: run_log.jsonl next to --out)")
     b.add_argument("--compiler-validate", action="store_true")
+    # V3 repository-level validation (opt-in)
+    b.add_argument("--repo-validate", action="store_true",
+                   help="also run repository-level compilation validation (V3)")
+    b.add_argument("--repo-cache", default=None,
+                   help="cache dir for cloned repos (default: ~/.cache/cpp_transform/repos)")
+    b.add_argument("--repo-build-timeout", type=int, default=600,
+                   help="per-command build timeout in seconds (default 600)")
+    b.add_argument("--repo-log-dir", default=None,
+                   help="dir to write per-record build logs (default: none)")
     add_frontend_args(b)
     b.set_defaults(func=cmd_batch)
 

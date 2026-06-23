@@ -44,6 +44,26 @@ def test_batch_isolates_errors_and_marks_language(frontend, tmp_path):
     assert any(e.get("error") == "language_unresolved" for e in log)
 
 
+def test_batch_repo_validate_skips_without_metadata(frontend, tmp_path):
+    # A record with no repo metadata must yield repo_validation=skipped_no_repo
+    # (and never touch the network).
+    data = tmp_path / "in.jsonl"
+    data.write_text(
+        json.dumps({"file_name": "ok.c",
+                    "func_vuln": "int f(int a){ int x = a; return x; }"}) + "\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.jsonl"
+    rc = main([
+        "batch", "--jsonl", str(data), "--out", str(out),
+        "--transforms", "variable_chain", "--fields", "vuln",
+        "--mode", "separate", "--repo-validate",
+    ])
+    assert rc == 0
+    rec = [r for r in _read_jsonl(out) if r["transform"]["status"] == "success"][0]
+    assert rec["transform"]["repo_validation"]["status"] == "skipped_no_repo"
+
+
 def test_batch_combined_mode(frontend, tmp_path):
     data = tmp_path / "in.jsonl"
     data.write_text(

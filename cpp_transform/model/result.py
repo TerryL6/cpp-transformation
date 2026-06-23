@@ -28,9 +28,13 @@ class TransformResult:
     transformed_location: list[dict[str, Any]] = field(default_factory=list)
     validation: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    # Repository-level validation (V3). Stored ALONGSIDE the lightweight
+    # ``validation`` block (success|skipped|failed), never overwriting it. Left
+    # as ``None`` when repo validation was not attempted.
+    repo_validation: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "name": self.name,
             "family": self.family,
             "status": self.status,
@@ -44,3 +48,6 @@ class TransformResult:
             "validation": self.validation,
             "error": self.error,
         }
+        if self.repo_validation is not None:
+            out["repo_validation"] = self.repo_validation
+        return out

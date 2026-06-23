@@ -44,6 +44,7 @@ def generate_report(
     status_by_transform: dict[str, Counter] = defaultdict(Counter)
     reparse = Counter()
     compiler = Counter()
+    repo_val = Counter()
     loc_relative_to = Counter()
     loc_with_before = 0
     loc_with_after = 0
@@ -56,6 +57,9 @@ def generate_report(
         reparse[(val.get("srcml_reparse") or {}).get("status", "n/a")] += 1
         if "compiler" in val:
             compiler[val["compiler"].get("status", "n/a")] += 1
+        rv = meta.get("repo_validation")
+        if rv:
+            repo_val[rv.get("status", "n/a")] += 1
         selected = meta.get("selected_candidates") or []
         before = (selected[0].get("source_location") if selected else None) or {}
         if before:
@@ -82,6 +86,12 @@ def generate_report(
         lines.append("## Compiler validation")
         lines.append("")
         lines.append(", ".join(f"{k}={v}" for k, v in sorted(compiler.items())))
+        lines.append("")
+
+    if repo_val:
+        lines.append("## Repository validation")
+        lines.append("")
+        lines.append(", ".join(f"{k}={v}" for k, v in sorted(repo_val.items())))
         lines.append("")
 
     lines.append("## Source locations")

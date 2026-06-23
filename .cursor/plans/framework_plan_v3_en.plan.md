@@ -4,22 +4,22 @@ overview: Add repository-level compilation validation to the existing srcML+lxml
 todos:
   - id: repo-metadata-build
     content: Implement repo metadata parsing and a pluggable, dataset-agnostic build-recipe configuration covering url/commit/file and setup/build/timeout.
-    status: pending
+    status: completed
   - id: repo-provision-checkout
-    content: Implement repository fetch/cache and checkout of the correct commit, with an isolated temporary workspace (git worktree or copy) and post-run cleanup.
-    status: pending
+    content: Implement repository fetch/cache and checkout of the target commit (validating func_vuln uses the parent commit commit_id^1), with an isolated temporary workspace (git worktree or copy) and post-run cleanup.
+    status: completed
   - id: repo-baseline-build
     content: Implement the unchanged-baseline build and adjudication, distinguishing "the repo already fails to build (baseline_failed)" from "the transform introduced a regression (failed)".
-    status: pending
+    status: completed
   - id: repo-placement
     content: Implement exact whole-function replacement (func_name + signature + original text); on multiple/fuzzy matches use skipped_ambiguous and never patch incorrectly.
-    status: pending
+    status: completed
   - id: repo-validation-mvp
-    content: Wire together build adjudication + status classification + log storage; prove the minimal loop on a single repository in the dataset.
-    status: pending
+    content: Wire together build adjudication + status classification + log storage; prove the single-repository minimal loop on the pilot repository oniguruma.
+    status: completed
   - id: repo-output-status
     content: Extend TransformResult/run_log/report with the repo_validation status enum, build-log references, and an outcome-distribution summary.
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -41,6 +41,7 @@ Beyond the lightweight validation, add **repository-level compilation validation
 
 - The current [pipeline.py](cpp_transform/pipeline.py) runs `srcml_reparse + structural + applied (+ compiler)` after unparse, rolls back on failure, and keeps the batch going; the `CompilerValidator` in [validation/validators.py](cpp_transform/validation/validators.py) already uses an `original vs transformed` dual compile to distinguish "the snippet was never independently compilable (skipped)" from "the transform introduced a regression (failed)" - **this idea is directly reused at the repository level as baseline vs transformed build**.
 - **The data already supports it**: each record in `sven_sample_10.jsonl` contains `project_url / commit_id / file_name / func_name / line_changes`, which provide the repository address, revision, target file, and location anchors.
+- **`commit_id` semantics (empirically confirmed, critical)**: `commit_id` is the **fix commit**, not the vulnerability-introducing commit. `func_fixed` = the function in the target file at `commit_id` (the fixed version); `func_vuln` = the function at the **parent commit `commit_id^`** (the vulnerable version); `line_changes.added` are lines the fix introduced and appear only in `func_fixed`. Verified: for record 1 (DBD-mysql/`dbdimp.c`/`3619c170`), the fix-added line `imp_sth->stmt->bind[i].buffer_length = fbh->length;` is present in the file at `commit_id` and occurs 0 times at the parent commit `2195ec63`. This reflects the SVEN convention of extracting (vuln@parent, fixed@commit) function pairs from a fix commit.
 - **Design stance**: add an independent `repo/` subsystem, triggered via [pipeline.py](cpp_transform/pipeline.py) in the validate stage behind an **optional switch**; [TransformResult](cpp_transform/model/result.py) gains a `repo_validation` field. No existing module is rewritten.
 
 ## 3. Repository-Level Validation Workflow
@@ -49,7 +50,7 @@ Beyond the lightweight validation, add **repository-level compilation validation
 flowchart TD
   meta["read repo metadata (url/commit/file)"] --> avail{"metadata sufficient?"}
   avail -->|no| skipNoRepo["status = skipped_no_repo"]
-  avail -->|yes| provision["fetch/cache repo + checkout commit"]
+  avail -->|yes| provision["fetch/cache repo + checkout target commit<br/>(validate func_vuln → commit_id^; func_fixed → commit_id)"]
   provision --> baseline["build unchanged baseline"]
   baseline --> basejudge{"baseline compiles?"}
   basejudge -->|no| baseFail["status = baseline_failed (not a transform failure)"]
@@ -67,6 +68,7 @@ flowchart TD
   envErr --> cleanup
 ```
 
+- **Which commit to check out depends on the field being validated (driven by `commit_id` semantics)**: validating `func_vuln` MUST check out **`commit_id^` (parent / vulnerable state)** - only there does the target file naturally contain `func_vuln`, so the exact-text match lands and the baseline is "vulnerable state, unmodified"; validating `func_fixed` checks out `commit_id`. Resolve the parent with `git rev-parse <commit_id>^1` (first parent); merge commits (multiple parents) or root commits (no parent) -> `environment_error`/`skipped`, no guessing. Ignore `?w=1` and similar params in `commit_url`; always rely on the clean `commit_id` field.
 - **Isolation and cleanup**: each record operates in an isolated temporary workspace (git worktree or repository copy), restored/removed afterward, never polluting the cached clean checkout.
 - **Baseline first**: an unchanged baseline must be built first; if the baseline already fails -> `baseline_failed`, which is how we **distinguish "the repository already fails to build" from "the transformation caused the build to fail."**
 - **Avoid patching the wrong location**: locate using `func_name` + signature + exact original text (aided by V2's location/line-number mapping); multiple or fuzzy matches -> `skipped_ambiguous`, with **no guessing and no incorrect patching**.
@@ -76,6 +78,7 @@ flowchart TD
 ## 4. Required Repository Metadata and Build Configuration
 
 - **Required metadata**: repository address (`project_url` or a local path), revision (`commit_id`), target file (`file_name`), location info (`func_name`/original text).
+- **Revision resolution**: `commit_id` is the fix commit; derive the actual checkout revision from the validated field - `func_vuln` -> `commit_id^1` (parent), `func_fixed` -> `commit_id`. The metadata layer is responsible for producing the "revision to check out" rather than using `commit_id` directly.
 - **Build-configuration abstraction (no hard-coding for a single repo)**: a pluggable "build recipe" configuration (a separate JSON/registry), each entry containing `setup_cmd`, `build_cmd`, `workdir`, `timeout`, and an optional container image; provide generic detection (autotools `./configure && make`, `cmake`, `make`) as defaults, overridable per `project`.
 - The design stays **dataset-agnostic**: it does not assume all records carry the same fields; missing fields downgrade to `skipped_no_repo`.
 
@@ -114,12 +117,13 @@ flowchart TD
 ## 8. Risks, Limitations, and Open Questions
 
 - **Risks/limitations**: Windows vs WSL path/execution differences; cloning large repos is slow/disk-heavy/network-dependent; real project build environments are hard to reproduce (may need Docker); function-matching ambiguity; build side effects/nondeterminism.
-- **Open questions for you to decide**:
-  1. Is **network cloning** allowed for repository-level validation? Use **Docker**? Where should the cache directory live?
-  2. Default **build timeout** threshold and failure-retry policy?
-  3. Run repository validation on `func_fixed` as well, or only `func_vuln`?
-  4. Are build recipes shipped with the dataset and manually maintained, or is auto-detection preferred?
-  5. Is the primary runtime **WSL** or native Windows?
+- **Resolved decisions (open questions confirmed)**:
+  1. **Network cloning allowed** into a local cache directory; **no Docker** for Phases 1-4 (Docker deferred to Phase 6).
+  2. Default **build timeout 600 seconds**, **no retry**.
+  3. **Validate `func_vuln` only** (hence check out `commit_id^`); `func_fixed` not validated for now.
+  4. Build recipes **auto-detection first** (autotools/cmake/make), with a hand-written recipe as a fallback for the pilot repository.
+  5. Primary runtime is **WSL**.
+- **First pilot repository**: `oniguruma` (pure C, self-contained, autotools, fast to build).
 
 ## 9. Recommendation on What to Implement First
 
