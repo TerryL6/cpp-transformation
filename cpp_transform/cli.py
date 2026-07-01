@@ -56,6 +56,30 @@ def _first_before(selected_candidates: list[dict]) -> dict:
     return selected_candidates[0].get("source_location") or {}
 
 
+def _anchor_requests(args, record: dict, field: str):
+    """Build V4 anchor requests from a record's ``line_changes`` (or None).
+
+    Returns ``None`` when --track-anchor is off so the pipeline skips anchoring
+    entirely; returns a (possibly empty) request list otherwise.
+    """
+    if not getattr(args, "track_anchor", False):
+        return None
+    from .anchor.builder import (
+        requests_from_lines,
+        target_lines_from_line_changes,
+    )
+
+    lines = target_lines_from_line_changes(record.get("line_changes"), field)
+    return requests_from_lines(lines)
+
+
+def _anchor_statuses(vuln_anchor: list[dict] | None) -> list[str] | None:
+    """Compact ``[status, ...]`` view for the run log (or None)."""
+    if not vuln_anchor:
+        return None
+    return [b.get("status") for b in vuln_anchor]
+
+
 # -- file ------------------------------------------------------------------
 def cmd_file(args) -> int:
     frontend = make_frontend(args)
@@ -185,6 +209,11 @@ def cmd_batch(args) -> int:
                 continue
             language = decision.language
 
+            # V4 (opt-in): build vulnerability-anchor requests from the record's
+            # line_changes for this field. Empty when --track-anchor is off or
+            # line_changes carries no usable lines.
+            anchor_reqs = _anchor_requests(args, record, field)
+
             if args.mode == "separate":
                 for name in names:
                     res = apply_transform(
@@ -192,6 +221,7 @@ def cmd_batch(args) -> int:
                         pick=args.pick, seed=args.seed, target_field=field,
                         compiler_validate=args.compiler_validate,
                         input_kind="jsonl_field", source=field,
+                        anchors=anchor_reqs,
                     )
                     if repo_config is not None:
                         run_repo_validation(res, record, repo_config)
@@ -203,7 +233,8 @@ def cmd_batch(args) -> int:
                             candidate_count=res.candidate_count,
                             before_line=before.get("start_line"),
                             relative_to=before.get("relative_to"),
-                            repo_validation=repo_status)
+                            repo_validation=repo_status,
+                            vuln_anchor=_anchor_statuses(res.vuln_anchor))
                     n_out += 1
                     if res.status == "failed":
                         n_fail += 1
@@ -222,8 +253,13 @@ def cmd_batch(args) -> int:
                         pick=args.pick, seed=args.seed, target_field=field,
                         compiler_validate=args.compiler_validate,
                         input_kind="jsonl_field", source=field,
+                        anchors=anchor_reqs,
                     )
                     statuses.append((name, res.status))
+                    # Carry the latest anchor view (each sub-transform re-injects
+                    # on its own parse); the last run reflects the final tree.
+                    if res.vuln_anchor is not None:
+                        combined.vuln_anchor = res.vuln_anchor
                     # Keep the first transform that actually selected sites: its
                     # input is the original code, so its BEFORE positions stay in
                     # original coordinates.
@@ -332,6 +368,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="per-command build timeout in seconds (default 600)")
     b.add_argument("--repo-log-dir", default=None,
                    help="dir to write per-record build logs (default: none)")
+    # V4 vulnerability anchoring (opt-in)
+    b.add_argument("--track-anchor", action="store_true",
+                   help="track vulnerability anchors through the transform (V4): "
+                        "inject va:id from the record's line_changes, then recover "
+                        "the surviving node's after-position")
     add_frontend_args(b)
     b.set_defaults(func=cmd_batch)
 

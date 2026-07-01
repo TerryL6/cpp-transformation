@@ -32,6 +32,12 @@ class TransformResult:
     # ``validation`` block (success|skipped|failed), never overwriting it. Left
     # as ``None`` when repo validation was not attempted.
     repo_validation: dict[str, Any] | None = None
+    # Vulnerability anchoring (V4). A list of per-anchor blocks
+    # ``{id, role, before, after, status}`` recording whether each anchored vuln
+    # node survived the transform and where it landed. Stored ALONGSIDE
+    # ``validation`` / ``repo_validation``, never overwriting them. Left as
+    # ``None`` when anchor tracking was not requested (``--track-anchor`` off).
+    vuln_anchor: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -50,4 +56,6 @@ class TransformResult:
         }
         if self.repo_validation is not None:
             out["repo_validation"] = self.repo_validation
+        if self.vuln_anchor is not None:
+            out["vuln_anchor"] = self.vuln_anchor
         return out

@@ -26,6 +26,7 @@ source --srcml--> srcML XML tree --lxml mutate--> new tree --srcml--> source
 | Transform | `transforms/` | selected candidate -> mutated tree |
 | Codegen | `codegen/unparse.py` | tree -> source |
 | Validate | `validation/validators.py` | reparse / compiler / structural / applied |
+| Anchor (opt) | `anchor/` | inject `va:id` before transform, recover after (V4) |
 | Dataset I/O | `io/` | streaming JSONL + language detection + writer |
 | Report | `report/` | output JSONL -> markdown + diffs |
 
@@ -175,6 +176,7 @@ python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --lines 
 | `--repo-cache` | path / default `~/.cache/cpp_transform/repos` | Where full clones are cached (one per repo, reused across runs). |
 | `--repo-build-timeout` | int seconds / default `600` | Per-command build timeout. Large repos (e.g. FFmpeg) may need a higher value. |
 | `--repo-log-dir` | path / default: none | Directory to write combined baseline+transformed build logs (one file per record). |
+| `--track-anchor` | flag / default off | Track **vulnerability anchors** (V4): inject a durable `va:id` from the record's `line_changes`, then after the transform report whether the vuln node survived and where it landed. See [below](#vulnerability-anchoring-v4). |
 | `--srcml-bin` / `--srcml-lib` | same as `file` | srcml binary and library paths. |
 
 **Output record schema** (separate mode): every original record field is kept,
@@ -237,7 +239,24 @@ The `transform` block looks like this:
     "baseline_status": "passed",   // build of the UNMODIFIED checkout
     "mapping_status": "exact",     // how the function was matched (exact|normalized)
     "detail": null                 // extra reason for non-passed / edge cases
-  }
+  },
+
+  "vuln_anchor": [                 // VULN ANCHORING (only with --track-anchor);
+    {                              // sibling of validation/repo_validation
+      "id": "VA1",                 // stable anchor identity
+      "role": "sink",
+      "before": {                  // where the vuln node sat BEFORE (input coords)
+        "source": "func_vuln", "relative_to": "input",
+        "start_line": 34, "start_col": 9, "end_line": 35, "end_col": 53
+      },
+      "after": {                   // where it landed AFTER (output coords), or null
+        "source": "func_vuln", "relative_to": "output",
+        "start_line": 34, "start_col": null, "end_line": 35, "end_col": null
+      },
+      "status": "tracked",         // tracked | lost | ambiguous | not_attempted
+      "detail": null
+    }
+  ]
 }
 ```
 
@@ -510,3 +529,109 @@ transformed tree builds → `repo_validation = passed`.
 > Requirements: a working build toolchain (gcc/make, plus cmake for cmake repos)
 > and network access for the initial clone. No Docker is used in V3 phases 1–4;
 > WSL is the reference environment.
+
+## Vulnerability anchoring (V4)
+
+The evaluation loop is: run a detector on the original code (ground-truth vuln
+location known) → transform → re-run the detector. That only makes sense if we
+still know **where the vulnerability went**. V4 gives each vulnerable point a
+**durable identity that survives transformation**.
+
+### How it works
+
+After parsing (with `--position`), we attach a custom namespaced attribute
+`va:id="VA1"` to the smallest enclosing **statement node** of a vulnerable line —
+exactly analogous to srcML's `pos:start`/`pos:end`, but authored by us in the
+lxml layer. The attribute lives **only in the XML tree**; srcML's `--unparse`
+emits source from element text and ignores unknown namespaced attributes, so
+`va:*` **never appears in the emitted C/C++** and cannot pollute code or affect a
+downstream detector (the same reason `pos:*` never leaks; confirmed by a test).
+
+- **Injection** — the anchored line comes from the record's `line_changes`
+  (`func_vuln` → the fix-*deleted* lines; `func_fixed` → the *added* lines).
+  `line_changes[*].line_no` is function-relative, so it maps directly onto the
+  extracted-function tree.
+- **Propagation** — any transform that removes/replaces/regenerates a node must
+  carry `va:*` onto the surviving node (`carry_anchor` in `transforms/base.py`).
+  `variable_chain` does this: it pins the anchor onto the primary sink (the
+  declaration that still holds the value). A plain move needs nothing.
+- **Recovery** — after the transform we XPath `va:id` on the mutated tree. To get
+  the *new* line span (srcML `pos:*` go stale after mutation) we probe a
+  throwaway deep copy: glue a unique comment token at the anchored node, unparse,
+  read the token's line, discard the copy (the emitted output is untouched).
+
+> **Anchor ≠ candidate.** The framework's locators find *transformation
+> candidates* (safe-to-rewrite patterns); the *vulnerability anchor* is the real
+> vulnerable point from ground truth. They may sit at different lines.
+
+### Status enum (`vuln_anchor[*].status`)
+
+| Status | Meaning |
+| --- | --- |
+| `tracked` | Exactly one node still carries the anchor → clean before → after mapping. |
+| `lost` | Zero surviving nodes → the vulnerable node may be gone (red flag). |
+| `ambiguous` | More than one surviving node → a legit split we do not resolve by guessing. |
+| `not_attempted` | Anchoring was requested but the line matched no statement node, or recovery never ran. |
+
+### The `vuln_anchor` block
+
+Attached as **`transform.vuln_anchor`** — a **sibling** of `transform.validation`
+(snippet checks) and `transform.repo_validation` (repo build), never nested
+inside them. It is a **list**, one entry per anchor. Each entry has six fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | Stable anchor identity assigned at injection (`VA1`, `VA2`, …), in ascending order of the anchored line. It is what XPath looks for after the transform; the same `id` links the `before` and `after` positions. |
+| `role` | string / null | A tag for what the anchored node is, for reporting only (currently always `"sink"`). Reserved for future roles (e.g. `source`, `guard`). |
+| `before` | [`SourceLocation`](#sourcelocation-fields-6) / null | Where the vulnerable node sat **before** the transform, read eagerly from srcML `pos:*`. Precise (line + column). `relative_to` is `input` for a JSONL field / snippet, `file` for a real file. `null` only if the node had no position. |
+| `after` | [`SourceLocation`](#sourcelocation-fields-6) / null | Where the anchor **landed after** the transform, recovered via the marker probe. Line-level only (`start_col`/`end_col` are `null`), `relative_to = output`. `null` when `status` is `lost` or `not_attempted`. |
+| `status` | enum | Survival outcome — one of the [status enum](#status-enum-vuln_anchorstatus) values (`tracked` / `lost` / `ambiguous` / `not_attempted`). |
+| `detail` | string / null | Extra reason for non-`tracked` / edge cases, e.g. `no statement node covers line N` when injection failed. `null` when there is nothing to add. |
+
+> The whole `vuln_anchor` block is **omitted** (the field is absent, not `null`)
+> when anchoring produced no requests at all — see the line-selection rule below.
+
+### Which lines get anchored
+
+The anchored lines come from the record's `line_changes` (the fix diff),
+interpreted per target field:
+
+| Field | Anchored lines | Rationale |
+| --- | --- | --- |
+| `func_vuln` | the fix-**deleted** lines (`line_changes.deleted[*].line_no`) | those are the lines that existed in the vulnerable version and the fix removed/changed — i.e. the vulnerable statements. |
+| `func_fixed` | the fix-**added** lines (`line_changes.added[*].line_no`) | the added lines exist only in the fixed version. |
+
+`line_no` is **function-relative** (line 1 = the function's first line), so it
+maps directly onto the extracted-function tree. Each target line is resolved to
+its smallest enclosing statement node.
+
+> **Pure-addition fixes have no `func_vuln` anchor.** If a fix only *adds* lines
+> (e.g. inserts a bounds check) and deletes nothing, there are no deleted lines,
+> so `func_vuln` gets no anchor and its `vuln_anchor` block is omitted. This is
+> expected, not a bug: there is no specific deleted statement to anchor in the
+> vulnerable version. (In `sven_sample_10.jsonl`, records 1–3 are pure-addition
+> fixes and therefore carry no `func_vuln` anchor.)
+
+### Try it (worked, real — fast, no repo build)
+
+Record 9 is FFmpeg `rm_read_multi`. Its `line_changes` marks function-relative
+line 35 (`... size2, mime);`, which the fix changed to `NULL`) — a **different**
+line from the `variable_chain` candidate on line 4:
+
+```bash
+export SRCML_BIN=$HOME/srcml/bin/srcml SRCML_LIB=$HOME/srcml/lib
+python3 -m cpp_transform.cli batch --jsonl sven_sample_10.jsonl --out - --lines 9 \
+    --transforms variable_chain --fields vuln --track-anchor \
+    2>/dev/null | jq '.transform.vuln_anchor'
+```
+
+Expected: one `VA1` block with `status: "tracked"`, `before` at lines 34–35 and
+`after` at lines 34–35 (`variable_chain` keeps its two new declarations on one
+line, so no line shift). This proves the anchor is injected on the true
+vulnerable statement, survives a real transform applied elsewhere, and is
+re-located afterwards.
+
+Anchoring is orthogonal to repo validation, so you can combine them
+(`--track-anchor --repo-validate`) to get both a build result and a survival
+status in the same record. Cross-file moves and multi-anchor records are
+deferred (phase 6).

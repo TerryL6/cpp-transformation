@@ -28,6 +28,7 @@ def apply_transform(
     compiler_validate: bool = False,
     input_kind: str = "snippet",
     source: str | None = None,
+    anchors: list | None = None,
 ) -> TransformResult:
     result = TransformResult(
         name=transform.name,
@@ -53,6 +54,20 @@ def apply_transform(
         input_kind=input_kind,
         source=source,
     )
+
+    # -- inject vulnerability anchors (V4, opt-in) --------------------------
+    # Runs right after parse (positions still valid) and before any mutation, so
+    # anchored nodes carry their BEFORE location. ``vuln_anchor`` is seeded with
+    # before-only ``not_attempted`` blocks so every early-return path still
+    # reports the anchors; the success path overwrites them with recovered
+    # after-positions and a survival status.
+    anchor_specs: list = []
+    if anchors:
+        from .anchor.builder import inject_anchors
+        from .anchor.finalize import pending_blocks
+
+        anchor_specs = inject_anchors(unit, anchors, input_kind, source)
+        result.vuln_anchor = pending_blocks(anchor_specs)
 
     # -- locate + pick ------------------------------------------------------
     candidates = transform.find_candidates(ctx)
@@ -123,6 +138,15 @@ def apply_transform(
         result.transformed_location = [
             s.to_dict() for s in changed_line_spans(code, transformed, source)
         ]
+        # Recover where each anchor landed and classify its survival. Runs on the
+        # mutated tree (``va:*`` still ride the surviving nodes); recovery probes
+        # a throwaway copy, so the emitted output above is unaffected.
+        if anchors:
+            from .anchor.finalize import finalize_anchors
+
+            result.vuln_anchor = finalize_anchors(
+                anchor_specs, ctx.unit, frontend, language, source
+            )
     else:
         result.status = "failed"
         result.transformed_code = code  # rollback

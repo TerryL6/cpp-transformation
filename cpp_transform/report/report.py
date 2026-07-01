@@ -45,6 +45,8 @@ def generate_report(
     reparse = Counter()
     compiler = Counter()
     repo_val = Counter()
+    anchor_status = Counter()
+    anchor_records = 0
     loc_relative_to = Counter()
     loc_with_before = 0
     loc_with_after = 0
@@ -60,6 +62,11 @@ def generate_report(
         rv = meta.get("repo_validation")
         if rv:
             repo_val[rv.get("status", "n/a")] += 1
+        va = meta.get("vuln_anchor")
+        if va:
+            anchor_records += 1
+            for block in va:
+                anchor_status[block.get("status", "n/a")] += 1
         selected = meta.get("selected_candidates") or []
         before = (selected[0].get("source_location") if selected else None) or {}
         if before:
@@ -92,6 +99,17 @@ def generate_report(
         lines.append("## Repository validation")
         lines.append("")
         lines.append(", ".join(f"{k}={v}" for k, v in sorted(repo_val.items())))
+        lines.append("")
+
+    if anchor_status:
+        lines.append("## Vulnerability anchors")
+        lines.append("")
+        lines.append(f"Records with anchors: {anchor_records}/{len(records)}")
+        lines.append("")
+        lines.append(
+            "- anchor status: "
+            + ", ".join(f"{k}={v}" for k, v in sorted(anchor_status.items()))
+        )
         lines.append("")
 
     lines.append("## Source locations")

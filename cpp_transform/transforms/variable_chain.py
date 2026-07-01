@@ -26,7 +26,7 @@ from lxml import etree
 from ..common import NS, localname, src, text_of
 from ..model.candidate import Candidate
 from ..model.context import TransformContext
-from .base import Transformation, register
+from .base import Transformation, carry_anchor, register
 
 _PRIMITIVE = {
     "int", "char", "short", "long", "float", "double", "void",
@@ -171,6 +171,13 @@ class VariableChain(Transformation):
         n1 = copy.deepcopy(new_decls[1])
         n0.tail = " "
         n1.tail = orig_tail
+
+        # Anchor-aware propagation (V4): the original decl_stmt is removed and
+        # replaced by two new statements. Carry any vulnerability anchor onto the
+        # primary sink -- ``n1`` (``T x = __chain_x;``), which still declares the
+        # original variable and holds the value that reaches downstream uses.
+        # No-op when the node carries no anchor.
+        carry_anchor(decl_stmt, n1)
 
         parent.insert(idx, n0)
         parent.insert(idx + 1, n1)
